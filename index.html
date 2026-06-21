@@ -1083,10 +1083,18 @@ function gsbSheet(){openSheet(`<h2>Fetch keys online</h2>
   $("#gsbSave").onclick=()=>{const v=$("#gsbTok").value.trim();if(v)localStorage.rg_gsb=v;closeSheet();toast(v?"Key saved — tap Fetch again":"No key entered");};
 }
 async function gsbLookup(title,artist,key){
-  const lk=encodeURIComponent(`song:${title} artist:${primArtist(artist)}`);
-  const r=await fetch(`https://api.getsong.co/search/?api_key=${encodeURIComponent(key)}&type=both&lookup=${lk}`);
-  const j=await r.json();const arr=j&&j.search;if(!Array.isArray(arr)||!arr.length)return null;
-  const hit=arr[0];return {key:normKey(hit.key_of||hit.key||""),bpm:parseInt(hit.tempo||hit.bpm||0)||null};
+  const ak=encodeURIComponent(key);
+  async function search(lk){const r=await fetch(`https://api.getsong.co/search/?api_key=${ak}&type=song&lookup=${encodeURIComponent(lk)}`);
+    const j=await r.json();return (j&&Array.isArray(j.search))?j.search:null;}
+  let arr=await search(`song:${title} artist:${primArtist(artist)}`);
+  if(!arr||!arr.length)arr=await search(title);           // fallback: title only
+  if(!arr||!arr.length)return null;
+  const hit=arr[0];let kof=hit.key_of,tempo=hit.tempo;
+  if(kof===undefined&&hit.id){                            // key/tempo live on the song detail endpoint
+    const r2=await fetch(`https://api.getsong.co/song/?api_key=${ak}&id=${encodeURIComponent(hit.id)}`);
+    const j2=await r2.json();if(j2&&j2.song){kof=j2.song.key_of;tempo=j2.song.tempo;}
+  }
+  return {key:normKey(kof||""),bpm:parseInt(tempo||0)||null};   // key_of is musical (e.g. "Em") -> normKey -> Camelot
 }
 $("#gsbStop").onclick=()=>{gsbStop=true;};
 $("#gsbRun").onclick=async()=>{
