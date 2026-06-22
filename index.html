@@ -244,6 +244,11 @@ nav{padding-left:2px;padding-right:2px}
 .cov{height:12px;border-radius:6px;background:var(--scHighest);overflow:hidden;margin:5px 0 2px}
 .cov i{display:block;height:100%;width:0%;border-radius:6px;transition:width .5s ease}
 .addset{flex:none;width:30px;height:30px;border-radius:9px;background:var(--primaryContainer);color:var(--onPrimaryContainer);font-size:20px;font-weight:700;line-height:1;display:grid;place-items:center}
+.ytbtn{flex:none;width:30px;height:30px;border-radius:9px;background:var(--surface);color:var(--red);font-size:12px;font-weight:700;line-height:1;display:grid;place-items:center;text-decoration:none;border:1px solid var(--line)}
+.livelinks{display:inline-flex;flex-wrap:wrap;gap:4px 10px}
+.livelinks a{color:var(--primary);font-weight:700;text-decoration:none;font-size:13px}
+.tips{margin-top:10px;padding:10px 12px;background:var(--surface);border-radius:12px;font-size:12.5px;line-height:1.55;color:var(--text2)}
+.tips b{color:var(--text)}
 .addset:active{filter:brightness(.93)}
 /* camelot wheel */
 .wheelbox{margin:4px 0}
@@ -344,7 +349,8 @@ html:not([data-reduce]) .wseg.active{animation:wpulse 1.05s ease-in-out infinite
       </div>
       <div id="liveMsg"></div>
       <div class="card" style="padding:12px"><div id="liveWheel" class="wheelbox"></div>
-        <p class="small" style="text-align:center;margin:6px 0 0">The lit wedge is what's playing; the brighter neighbours are what mixes. Tap any key to see those songs.</p></div>
+        <p class="small" style="text-align:center;margin:6px 0 0">The lit wedge is what's playing; the brighter neighbours are what mixes. Tap any key to see those songs.</p>
+        <div class="tips"><b>Harmonic moves</b> (Camelot): <b>same key</b> = perfect blend · <b>±1</b> same letter (e.g. 6B→5B/7B) = smooth · <b>same number, flip A/B</b> (6B→6A) = relative major/minor, changes the mood · <b>+7</b> (6B→1B) = energy boost. Keep the letter, step around the wheel.</div></div>
       <div class="seg intent" id="intentSegLive" style="margin:0 0 12px">
         <button data-i="lift">↑ Lift</button><button data-i="hold" class="on">→ Hold</button><button data-i="cool">↓ Cool</button><button data-i="surprise">✦ Surprise</button>
       </div>
@@ -621,6 +627,15 @@ function renderRows(){
 }
 window.addEventListener("scroll",()=>{if($("#pg-lib").classList.contains("on")&&!vpScrollPending){vpScrollPending=true;requestAnimationFrame(()=>{renderRows();vpScrollPending=false;});}});
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function ytLink(t,a){return "https://www.youtube.com/results?search_query="+encodeURIComponent(((a&&a!=="From the mic")?a+" ":"")+(t||""));}
+function geniusLink(t,a){return "https://genius.com/search?q="+encodeURIComponent(((a&&a!=="From the mic")?a+" ":"")+(t||""));}
+function songLinks(t,a,r){
+  let p=[`<a href="${ytLink(t,a)}" target="_blank" rel="noopener">▶ YouTube</a>`];
+  if(r&&r.apple_music&&r.apple_music.url)p.push(`<a href="${esc(r.apple_music.url)}" target="_blank" rel="noopener">Apple</a>`);
+  if(r&&r.spotify&&r.spotify.external_urls&&r.spotify.external_urls.spotify)p.push(`<a href="${esc(r.spotify.external_urls.spotify)}" target="_blank" rel="noopener">Spotify</a>`);
+  p.push(`<a href="${geniusLink(t,a)}" target="_blank" rel="noopener">Genius</a>`);
+  return `<span class="livelinks">${p.join(" · ")}</span>`;
+}
 
 /* ============ Song detail sheet ============ */
 function openSheet(html){$("#sheet").innerHTML='<div class="grab"></div>'+html;$("#scrim").classList.add("on");$("#sheet").classList.add("on");}
@@ -633,6 +648,7 @@ function songSheet(s){
   openSheet(`
     <h2>${esc(s.title)||"Untitled"}</h2>
     <div class="sa">${esc(s.artist)||"Unknown artist"}</div>
+    <div style="margin:2px 0 12px">${songLinks(s.title,s.artist,null)}</div>
     <div class="field"><label>BPM</label>
       <div style="display:flex;gap:8px;align-items:center">
         <input id="fBpm" type="number" inputmode="numeric" value="${s.bpm||""}" placeholder="e.g. 124" style="flex:1">
@@ -756,8 +772,10 @@ function renderMatchList(mw,s){
         <span style="font-size:13px;font-weight:700;color:var(--text2)">${c.bpm||"—"}${bpmDelta?` <span style="color:${bpmDelta>0?'var(--green)':'var(--orange)'}">${bpmDelta>0?"+":""}${bpmDelta}</span>`:""}${c.key?" · "+c.key:""}</span>
       </div>
       <button class="addset" data-add="${c.id}">+</button>
+      <a class="ytbtn" href="${ytLink(c.title,c.artist)}" target="_blank" rel="noopener" title="Watch on YouTube">▶</a>
     </div>`).join("");
   mw.querySelectorAll(".addset").forEach(b=>b.onclick=ev=>{ev.stopPropagation();addToSet(b.dataset.add);});
+  mw.querySelectorAll(".ytbtn").forEach(b=>b.onclick=ev=>ev.stopPropagation());
   mw.querySelectorAll(".match").forEach(m=>m.onclick=()=>{const c=ALL.find(x=>x.id===m.dataset.id);if(c)songSheet(c);});
 }
 $("#tol").oninput=e=>{tol=+e.target.value;$("#tolVal").textContent="±"+tol+"%";localStorage.rg_tol=tol;refreshMatches();};
@@ -857,7 +875,7 @@ $("#tapFind").onclick=()=>{const b=parseInt($("#tapBpm").textContent);if(isNaN(b
   setNowPlaying({id:"__tap__",title:b+" BPM (tapped)",artist:"Find by tempo",bpm:b,key:"",energy:null});go("mix");};
 
 /* ============ LIVE MICROPHONE ============ */
-let micStream=null,micCtx=null,micProc=null,micSink=null,micBuf=null,micWrite=0,micTimer=null,micOn=false,bpmHist=[],keyHist=[],micGain=1.5,meterTick=0;
+let micStream=null,micCtx=null,micProc=null,micSink=null,micBuf=null,micWrite=0,micTimer=null,micOn=false,bpmHist=[],keyHist=[],micGain=1.5,meterTick=0,dispKey="",dispBpm=0,kmStreak=0,bmStreak=0,liveShownKey="\u0000";
 function median(a){const s=a.filter(x=>x).sort((x,y)=>x-y);return s.length?s[Math.floor(s.length/2)]:0;}
 function modeOf(a){const m={};let best="",bc=0;a.forEach(x=>{if(!x)return;m[x]=(m[x]||0)+1;if(m[x]>bc){bc=m[x];best=x;}});return best;}
 function micUnsupported(){return !navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.isSecureContext;}
@@ -876,7 +894,7 @@ async function startMic(){
     for(let i=0;i<d.length;i++){let v=d[i]*micGain;if(v>1)v=1;else if(v<-1)v=-1;micBuf[micWrite]=v;micWrite=(micWrite+1)%micBuf.length;const a=v<0?-v:v;if(a>peak)peak=a;}
     if((meterTick++&3)===0){const m=$("#micMeter");if(m)m.style.width=Math.min(100,peak*120)+"%";}};
   src.connect(micProc);micProc.connect(micSink);micSink.connect(micCtx.destination);
-  micOn=true;bpmHist=[];keyHist=[];
+  micOn=true;bpmHist=[];keyHist=[];dispKey="";dispBpm=0;kmStreak=0;bmStreak=0;liveShownKey="\u0000";
   $("#micToggle").textContent="Stop";$("#micToggle").style.background="var(--primaryContainer)";
   $("#liveVinyl").classList.add("spin");$("#liveTitle").textContent="Listening…";$("#liveMsg").innerHTML="";
   micTimer=setInterval(()=>analyzeMic(sr),1600);setTimeout(()=>analyzeMic(sr),1700);
@@ -894,15 +912,21 @@ function analyzeMic(sr){
   let rms=0;for(let i=0;i<want;i++)rms+=seg[i]*seg[i];rms=Math.sqrt(rms/want);
   if(rms<0.004){$("#liveConf").textContent="too quiet — turn it up or move closer";return;}
   const k=detectKey(chromaOf(seg,sr)),cam=keyToCamelot(k.tonic,k.mode),bpm=foldBpmMaybe(detectBPM(seg,sr));
-  keyHist.push(cam);if(keyHist.length>5)keyHist.shift();
-  bpmHist.push(bpm);if(bpmHist.length>5)bpmHist.shift();
+  keyHist.push(cam);if(keyHist.length>9)keyHist.shift();
+  bpmHist.push(bpm);if(bpmHist.length>9)bpmHist.shift();
   const km=modeOf(keyHist),bm=median(bpmHist);
-  $("#liveBpm").textContent=bm||"—";$("#liveKey").textContent=km||"—";
+  // hysteresis: only change the shown key after a challenger holds for 3 reads
+  if(km&&km!==dispKey){kmStreak++;if(!dispKey||kmStreak>=3){dispKey=km;kmStreak=0;}}else kmStreak=0;
+  if(bm){if(!dispBpm)dispBpm=bm;else if(Math.abs(bm-dispBpm)>1){bmStreak++;if(bmStreak>=2){dispBpm=bm;bmStreak=0;}}else bmStreak=0;}
+  $("#liveBpm").textContent=dispBpm||"—";$("#liveKey").textContent=dispKey||"—";
   $("#liveTitle").textContent="Live input";
-  $("#liveConf").textContent=(k.score>0.7?"strong":k.score>0.5?"fair":"weak")+" reading — tap a match to mix";
-  nowPlaying={id:"__live__",title:"Live input",artist:"From the mic",bpm:bm,key:km||"",energy:null};
-  renderWheel($("#liveWheel"),km||"");
-  renderMatchList($("#liveMatches"),nowPlaying);
+  const conf=k.score>0.7?"strong":k.score>0.5?"fair":"weak";
+  $("#liveConf").textContent=(dispKey?`Best guess ${dispKey} · ${conf} signal`:"listening…")+" — tap What's this? to name it accurately";
+  // only re-render wheel + matches when the locked key actually changes (stops the constant reflow)
+  if(dispKey!==liveShownKey){liveShownKey=dispKey;
+    nowPlaying={id:"__live__",title:"Live input",artist:"From the mic",bpm:dispBpm,key:dispKey||"",energy:null};
+    renderWheel($("#liveWheel"),dispKey||"");renderMatchList($("#liveMatches"),nowPlaying);
+  } else if(nowPlaying&&nowPlaying.id==="__live__"){nowPlaying.bpm=dispBpm;}
 }
 $("#micToggle").onclick=()=>{micOn?stopMic():startMic();};
 micGain=+(localStorage.rg_micgain||15)/10;
@@ -921,31 +945,30 @@ $("#micId").onclick=async()=>{
     rec.ondataavailable=e=>chunks.push(e.data);
     rec.start();await new Promise(r=>setTimeout(r,6000));rec.stop();
     await new Promise(r=>rec.onstop=r);
-    const blob=new Blob(chunks);const fd=new FormData();fd.append("api_token",token);fd.append("file",blob);
+    const blob=new Blob(chunks);const fd=new FormData();fd.append("api_token",token);fd.append("file",blob);fd.append("return","apple_music,spotify");
     const resp=await fetch("https://api.audd.io/",{method:"POST",body:fd});
     const j=await resp.json();
     if(j.status==="success"&&j.result){const t=j.result.title,a=j.result.artist;
-      const liveKey=modeOf(keyHist)||"",liveBpm=median(bpmHist)||null;
-      $("#liveTitle").textContent=t;$("#liveConf").textContent="“"+t+"” — "+a;
-      $("#liveKey").textContent=liveKey||$("#liveKey").textContent;if(liveBpm)$("#liveBpm").textContent=liveBpm;
+      $("#liveTitle").textContent=t;$("#liveConf").textContent="“"+t+"” — "+a+" · finding key…";
+      let bpm=null,key="";
       const m=matchSong(t,a);
-      if(m.songs.length){            // already in library — fill in any missing key/BPM
-        let filled=0;for(const s of m.songs){let ch=false;
-          if(liveKey&&!s.key){s.key=liveKey;ch=true;}if(liveBpm&&!s.bpm){s.bpm=liveBpm;ch=true;}
-          if(ch){await put(s);filled++;}}
-        if(filled){MATCHIDX=null;buildView();updateStats();}
-        const s0=m.songs[0];nowPlaying={id:"__live__",title:t,artist:a,bpm:s0.bpm||liveBpm,key:s0.key||liveKey,energy:s0.energy||null};
-        renderWheel($("#liveWheel"),nowPlaying.key);renderMatchList($("#liveMatches"),nowPlaying);
-        toast(filled?`In library — added key to ${filled} version${filled>1?"s":""}`:"Found in your library");
-      } else {                       // not in library — add it once, no duplicate
-        const id=await hashId([t,a,"","",""].join("|").toLowerCase());
-        if(!ALL.some(s=>s.id===id)){
-          const o={id,title:t,artist:a,bpm:liveBpm,release:(j.result.album||""),mix:"",label:"",time:"",cwarn:0,end:"",key:liveKey,energy:null,fav:0};
-          await put(o);ALL.push(o);MATCHIDX=null;buildView();updateStats();}
-        nowPlaying={id:"__live__",title:t,artist:a,bpm:liveBpm,key:liveKey,energy:null};
-        renderWheel($("#liveWheel"),liveKey);renderMatchList($("#liveMatches"),nowPlaying);
-        toast("New song added to your library");
+      if(m.songs.length){const s0=m.songs.find(s=>s.key)||m.songs[0];bpm=s0.bpm||null;key=s0.key||"";}   // your library = most accurate
+      if(!key&&localStorage.rg_gsb&&window.isSecureContext){                                            // else ask GetSongBPM for the exact song
+        try{const r=await gsbLookup(t,a,localStorage.rg_gsb);if(r){if(r.key)key=r.key;if(!bpm&&r.bpm)bpm=r.bpm;}}catch(e){}
       }
+      if(!key)key=modeOf(keyHist)||"";if(!bpm)bpm=median(bpmHist)||null;                                 // last resort: the mic estimate
+      if(m.songs.length){let filled=0;for(const s of m.songs){let ch=false;
+          if(key&&!s.key){s.key=key;ch=true;}if(bpm&&!s.bpm){s.bpm=bpm;ch=true;}if(ch){await put(s);filled++;}}
+        if(filled){MATCHIDX=null;buildView();updateStats();}
+      } else {const id=await hashId([t,a,"","",""].join("|").toLowerCase());
+        if(!ALL.some(s=>s.id===id)){const o={id,title:t,artist:a,bpm,release:(j.result.album||""),mix:"",label:"",time:"",cwarn:0,end:"",key,energy:null,fav:0};await put(o);ALL.push(o);MATCHIDX=null;buildView();updateStats();}}
+      const en=(m.songs[0]&&m.songs[0].energy)||null;
+      nowPlaying={id:"__live__",title:t,artist:a,bpm,key,energy:en};
+      dispKey=key||dispKey;if(bpm)dispBpm=bpm;liveShownKey=key;
+      $("#liveKey").textContent=key||"—";if(bpm)$("#liveBpm").textContent=bpm;
+      $("#liveConf").innerHTML=`“${esc(t)}” — ${esc(a)} · <b style="color:var(--blue)">${key||"key ?"}</b>${bpm?(" · "+bpm+" BPM"):""}<br>${songLinks(t,a,j.result)}`;
+      renderWheel($("#liveWheel"),key);renderMatchList($("#liveMatches"),nowPlaying);
+      toast(key?("Identified · "+key+(bpm?(" · "+bpm+" BPM"):"")):"Identified — key not found online");
     } else {$("#liveConf").textContent="Couldn't name that one — turn the mic level up and try a clearer section";}
   }catch(e){$("#liveConf").textContent="Naming failed (needs internet / token). Live key+BPM still works.";}
 };
