@@ -421,6 +421,7 @@ html:not([data-reduce]) .wseg.active{animation:wpulse 1.05s ease-in-out infinite
         <div id="gsbProg" class="small" style="margin:6px 0"></div>
         <button class="btn" id="gsbRun">Fetch missing keys (batch)</button>
         <button class="btn ghost sm" id="gsbStop" style="display:none;color:var(--red)">Stop</button>
+        <button class="btn ghost sm" id="gsbReset" style="margin-top:8px">Retry skipped (not-found) songs</button>
         <p class="small" style="margin-top:8px">Data from <a href="https://getsongbpm.com" target="_blank" rel="noopener">GetSongBPM.com</a>. Tap once to set your free API key.</p>
       </div>
       <div class="card">
@@ -1104,25 +1105,35 @@ $("#gsbStop").onclick=()=>{gsbStop=true;};
 $("#gsbRun").onclick=async()=>{
   if(!window.isSecureContext){toast("Online fetch needs the hosted https site");return;}
   const key=localStorage.rg_gsb||"";if(!key){gsbSheet();return;}
-  const need=new Map();for(const s of ALL){if(s.key)continue;const k=taKey(s.title,s.artist);if(!need.has(k))need.set(k,{title:s.title,artist:s.artist});}
-  const items=[...need.values()];if(!items.length){toast("Every song already has a key");return;}
+  // unique title+artist that still need a key AND haven't been tried online before
+  const need=new Map();for(const s of ALL){if(s.key||s.tried)continue;const k=taKey(s.title,s.artist);if(!need.has(k))need.set(k,{title:s.title,artist:s.artist});}
+  const items=[...need.values()];
+  if(!items.length){const t=ALL.filter(s=>!s.key&&s.tried).length;
+    toast(t?`No new ones to try — ${t.toLocaleString()} were already checked (use Retry skipped)`:"Every song already has a key");return;}
   const idx=new Map();for(const s of ALL){const k=taKey(s.title,s.artist);if(!idx.has(k))idx.set(k,[]);idx.get(k).push(s);}
-  const cap=Math.min(items.length,200);gsbStop=false;let filled=0,fails=0;
+  const cap=Math.min(items.length,200);gsbStop=false;let filled=0,miss=0,fails=0;
   $("#gsbRun").style.display="none";$("#gsbStop").style.display="block";
   for(let i=0;i<cap&&!gsbStop;i++){const it=items[i];
     $("#gsbProg").innerHTML=`<div class="anbar"><i style="width:${(i/cap*100).toFixed(0)}%"></i></div>Looking up ${i+1}/${cap} · filled ${filled}<br><span style="color:var(--text3)">${esc(it.title)}</span>`;
-    let res=null;try{res=await gsbLookup(it.title,it.artist,key);fails=0;}
-    catch(e){fails++;if(fails>=5){$("#gsbProg").innerHTML=`<div class="muted">Couldn't reach the lookup service from the app — browsers often block it, or the key/limit is the issue. Your offline Analyze and CSV import still fill keys reliably.</div>`;break;}}
-    if(res&&res.key){const vs=idx.get(taKey(it.title,it.artist))||[];for(const s of vs){let ch=false;
+    let res=null,errored=false;
+    try{res=await gsbLookup(it.title,it.artist,key);fails=0;}
+    catch(e){errored=true;fails++;if(fails>=5){$("#gsbProg").innerHTML=`<div class="muted">Couldn't reach the lookup service from the app — browsers often block it, or the key/limit is the issue. Your offline Analyze and CSV import still fill keys reliably.</div>`;break;}}
+    const vs=idx.get(taKey(it.title,it.artist))||[];
+    if(res&&res.key){for(const s of vs){let ch=false;
       if(!s.key){s.key=res.key;ch=true;}if(!s.bpm&&res.bpm){s.bpm=foldBpmMaybe(res.bpm);ch=true;}
-      if(ch){await put(s);filled++;}}}
+      if(s.tried){s.tried=0;ch=true;}if(ch)await put(s);}filled++;}
+    else if(!errored){for(const s of vs){if(!s.tried){s.tried=1;await put(s);}}miss++;}  // found nothing -> skip it next time
     await new Promise(r=>setTimeout(r,450));
   }
   MATCHIDX=null;buildView();updateStats();
   $("#gsbRun").style.display="block";$("#gsbStop").style.display="none";
-  if(!$("#gsbProg").querySelector(".muted"))$("#gsbProg").innerHTML=`<span class="small">Batch done — filled <b>${filled}</b> song(s). ${items.length>cap?"Run again for the next "+Math.min(200,items.length-cap)+".":""}</span>`;
+  const remaining=Math.max(0,items.length-cap);
+  if(!$("#gsbProg").querySelector(".muted"))$("#gsbProg").innerHTML=`<span class="small">Batch done — filled <b>${filled}</b>, not found <b>${miss}</b> (skipped next time).${remaining?` ${remaining.toLocaleString()} new ones still to try — run again.`:" Every song has now been tried."}</span>`;
   toast(`Filled ${filled} keys`);
 };
+$("#gsbReset").onclick=async()=>{const ch=ALL.filter(s=>s.tried);if(!ch.length){toast("Nothing was skipped");return;}
+  if(!confirm(`Retry the ${ch.length.toLocaleString()} songs the database couldn't find last time? (Useful if it has grown, or you switched key sources.)`))return;
+  for(const s of ch)s.tried=0;await putMany(ch);updateStats();toast("Cleared — they'll be looked up again next run");};
 
 /* ============ chips / nav ============ */
 const CHIPS=[["all","All"],["bpm","Has BPM"],["nokey","Needs key"],["key","Has key"],["fav","★ Favorites"]];
