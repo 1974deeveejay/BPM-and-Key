@@ -247,8 +247,17 @@ nav{padding-left:2px;padding-right:2px}
 .ytbtn{flex:none;width:30px;height:30px;border-radius:9px;background:var(--surface);color:var(--red);font-size:12px;font-weight:700;line-height:1;display:grid;place-items:center;text-decoration:none;border:1px solid var(--line)}
 .livelinks{display:inline-flex;flex-wrap:wrap;gap:4px 10px}
 .livelinks a{color:var(--primary);font-weight:700;text-decoration:none;font-size:13px}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}
+.pgbtn{flex:none;padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--primary);font-weight:800;font-size:13px}
+.pgbtn:disabled{opacity:.35;color:var(--text3)}
+.pglabel{font-size:12.5px;font-weight:700;color:var(--text2)}
 .tips{margin-top:10px;padding:10px 12px;background:var(--surface);border-radius:12px;font-size:12.5px;line-height:1.55;color:var(--text2)}
 .tips b{color:var(--text)}
+.livesong{margin-top:12px;text-align:center}
+.livesong .songname{font-size:17px;font-weight:800;color:var(--onPrimaryContainer)}
+.livesong .yr{font-weight:600;color:var(--text2)}
+.livesong .songart{font-size:13px;color:var(--text2);margin:2px 0 8px}
+.linkbtn{background:none;border:none;color:var(--primary);font-weight:700;font-size:13px;text-decoration:underline;padding:4px}
 .addset:active{filter:brightness(.93)}
 /* camelot wheel */
 .wheelbox{margin:4px 0}
@@ -334,15 +343,17 @@ html:not([data-reduce]) .wseg.active{animation:wpulse 1.05s ease-in-out infinite
         <div class="vinyl" id="liveVinyl"></div>
         <div class="ey">Live from the mic</div>
         <div class="nt" id="liveTitle">Listen to the room</div>
-        <div class="na" id="liveConf">Point your phone at the speakers and tap Listen</div>
+        <div class="na" id="liveConf">Point your phone at the speakers and tap Listen &amp; lock</div>
         <div class="npstats">
           <div class="stat"><div class="v" id="liveBpm">—</div><div class="l">BPM</div></div>
           <div class="stat"><div class="v" id="liveKey" style="color:var(--blue)">—</div><div class="l">Key</div></div>
         </div>
+        <div id="liveSong" class="livesong"></div>
         <div style="display:flex;gap:10px;margin-top:14px">
-          <button class="btn ghost sm" id="micToggle" style="flex:2;background:var(--surface)">Listen</button>
+          <button class="btn ghost sm" id="micToggle" style="flex:2;background:var(--surface)">Listen &amp; lock</button>
           <button class="btn ghost sm" id="micId" style="flex:1;background:var(--surface)">What's this?</button>
         </div>
+        <div style="text-align:center;margin-top:8px"><button class="linkbtn" id="auddKeyBtn">Set song-naming key (AudD)</button></div>
         <div class="ctrlrow" style="margin-top:12px"><label style="color:var(--onPrimaryContainer)">Mic level</label><span class="ctrlval" id="micGainVal">1.5×</span></div>
         <input type="range" id="micGain" min="5" max="80" step="1" value="15">
         <div class="meter"><i id="micMeter"></i></div>
@@ -758,12 +769,23 @@ function computeMatches(s){
 }
 const LB={perfect:"Perfect",relative:"Relative",adjacent:"Smooth",energy:"Energy",bpmonly:"BPM"};
 function dirArrow(d){if(d>0)return `<span class="dir up">↑</span>`;if(d<0)return `<span class="dir dn">↓</span>`;return `<span class="dir fl">→</span>`;}
+let matchPage=0,matchSig="",matchMax=0;const MPAGE=4;
+function matchNav(d){matchPage=Math.max(0,Math.min(matchMax,matchPage+d));refreshMatches();}
 function renderMatchList(mw,s){
   if(!s||(!s.bpm&&!s.key)){mw.innerHTML=`<div class="card muted">Need a BPM or key to find mixes.</div>`;return;}
-  const res=computeMatches(s);const top=res.slice(0,150);
-  if(!top.length){mw.innerHTML=`<div class="card muted">No matches in this range. Widen the BPM range${s.key?"":" or add a key"} and try again.</div>`;return;}
+  const res=computeMatches(s);
+  if(!res.length){mw.innerHTML=`<div class="card muted">No matches in this range. Widen the BPM range${s.key?"":" or add a key"} and try again.</div>`;return;}
+  const list=res.slice(0,200);                                  // pageable pool, shown 4 at a time
+  const sig=[s.id||"",s.key||"",s.bpm||"",intent].join("|");
+  if(sig!==matchSig){matchSig=sig;matchPage=0;}                 // new song/intent -> back to the best 4
+  matchMax=Math.max(0,Math.ceil(list.length/MPAGE)-1);if(matchPage>matchMax)matchPage=matchMax;
+  const startI=matchPage*MPAGE,page=list.slice(startI,startI+MPAGE);
   const hint=intent==="lift"?"Lifting — higher tempo & brightening keys first":intent==="cool"?"Cooling — easing tempo & darkening keys first":intent==="surprise"?"Surprise — bold energy jumps allowed":"Holding — safest, closest blends first";
-  mw.innerHTML=`<div class="count">${res.length.toLocaleString()} compatible · ${hint}</div>`+top.map(({c,tier,dbl,dir,bpmDelta})=>`
+  const pager=`<div class="pager">
+    <button class="pgbtn mPrev" ${matchPage===0?"disabled":""}>◀ Back</button>
+    <span class="pglabel">${startI+1}–${Math.min(list.length,startI+MPAGE)} of ${res.length.toLocaleString()}</span>
+    <button class="pgbtn mNext" ${matchPage>=matchMax?"disabled":""}>Next ▶</button></div>`;
+  mw.innerHTML=`<div class="count">${res.length.toLocaleString()} compatible · ${hint}</div>`+pager+page.map(({c,tier,dbl,dir,bpmDelta})=>`
     <div class="match" data-id="${c.id}">
       <div class="tier ${tier}"></div>
       <div class="rowmain"><div class="rt">${esc(c.title)||"Untitled"}</div><div class="ra">${esc(c.artist)||"—"}</div></div>
@@ -773,10 +795,12 @@ function renderMatchList(mw,s){
       </div>
       <button class="addset" data-add="${c.id}">+</button>
       <a class="ytbtn" href="${ytLink(c.title,c.artist)}" target="_blank" rel="noopener" title="Watch on YouTube">▶</a>
-    </div>`).join("");
+    </div>`).join("")+pager;
   mw.querySelectorAll(".addset").forEach(b=>b.onclick=ev=>{ev.stopPropagation();addToSet(b.dataset.add);});
   mw.querySelectorAll(".ytbtn").forEach(b=>b.onclick=ev=>ev.stopPropagation());
   mw.querySelectorAll(".match").forEach(m=>m.onclick=()=>{const c=ALL.find(x=>x.id===m.dataset.id);if(c)songSheet(c);});
+  mw.querySelectorAll(".mPrev").forEach(b=>b.onclick=()=>matchNav(-1));
+  mw.querySelectorAll(".mNext").forEach(b=>b.onclick=()=>matchNav(1));
 }
 $("#tol").oninput=e=>{tol=+e.target.value;$("#tolVal").textContent="±"+tol+"%";localStorage.rg_tol=tol;refreshMatches();};
 $("#swDbl").onclick=()=>{useDbl=!useDbl;$("#swDbl").classList.toggle("on",useDbl);refreshMatches();};
@@ -875,7 +899,8 @@ $("#tapFind").onclick=()=>{const b=parseInt($("#tapBpm").textContent);if(isNaN(b
   setNowPlaying({id:"__tap__",title:b+" BPM (tapped)",artist:"Find by tempo",bpm:b,key:"",energy:null});go("mix");};
 
 /* ============ LIVE MICROPHONE ============ */
-let micStream=null,micCtx=null,micProc=null,micSink=null,micBuf=null,micWrite=0,micTimer=null,micOn=false,bpmHist=[],keyHist=[],micGain=1.5,meterTick=0,dispKey="",dispBpm=0,kmStreak=0,bmStreak=0,liveShownKey="\u0000";
+let micStream=null,micCtx=null,micProc=null,micSink=null,micBuf=null,micWrite=0,micTimer=null,micOn=false,bpmHist=[],keyHist=[],micGain=1.5,meterTick=0,dispKey="",dispBpm=0,kmStreak=0,bmStreak=0,liveShownKey="\u0000",micPhase="idle",listenTimer=null,listenLeft=0;
+const LISTEN_SECS=8;
 function median(a){const s=a.filter(x=>x).sort((x,y)=>x-y);return s.length?s[Math.floor(s.length/2)]:0;}
 function modeOf(a){const m={};let best="",bc=0;a.forEach(x=>{if(!x)return;m[x]=(m[x]||0)+1;if(m[x]>bc){bc=m[x];best=x;}});return best;}
 function micUnsupported(){return !navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.isSecureContext;}
@@ -894,41 +919,48 @@ async function startMic(){
     for(let i=0;i<d.length;i++){let v=d[i]*micGain;if(v>1)v=1;else if(v<-1)v=-1;micBuf[micWrite]=v;micWrite=(micWrite+1)%micBuf.length;const a=v<0?-v:v;if(a>peak)peak=a;}
     if((meterTick++&3)===0){const m=$("#micMeter");if(m)m.style.width=Math.min(100,peak*120)+"%";}};
   src.connect(micProc);micProc.connect(micSink);micSink.connect(micCtx.destination);
-  micOn=true;bpmHist=[];keyHist=[];dispKey="";dispBpm=0;kmStreak=0;bmStreak=0;liveShownKey="\u0000";
-  $("#micToggle").textContent="Stop";$("#micToggle").style.background="var(--primaryContainer)";
-  $("#liveVinyl").classList.add("spin");$("#liveTitle").textContent="Listening…";$("#liveMsg").innerHTML="";
-  micTimer=setInterval(()=>analyzeMic(sr),1600);setTimeout(()=>analyzeMic(sr),1700);
+  micOn=true;bpmHist=[];keyHist=[];dispKey="";dispBpm=0;micPhase="listening";listenLeft=LISTEN_SECS;
+  $("#micToggle").textContent="Listening… "+listenLeft+"s";$("#micToggle").style.background="var(--primaryContainer)";
+  $("#liveVinyl").classList.add("spin");$("#liveTitle").textContent="Listening…";$("#liveConf").textContent="Hold steady on one song…";$("#liveSong").innerHTML="";$("#liveMsg").innerHTML="";
+  micTimer=setInterval(()=>analyzeMic(sr),1300);setTimeout(()=>analyzeMic(sr),900);
+  listenTimer=setInterval(()=>{listenLeft--;if(listenLeft>0){$("#micToggle").textContent="Listening… "+listenLeft+"s";}else{lockResult(sr);}},1000);
 }
-function stopMic(){micOn=false;if(micTimer)clearInterval(micTimer);
+function lockResult(sr){
+  if(listenTimer){clearInterval(listenTimer);listenTimer=null;}
+  analyzeMic(sr);                                  // one final read
+  const km=modeOf(keyHist),bm=median(bpmHist);
+  stopMicHW();
+  $("#liveVinyl").classList.remove("spin");
+  if(!km&&!bm){micPhase="idle";$("#micToggle").textContent="Listen & lock";$("#micToggle").style.background="var(--surface)";
+    $("#liveTitle").textContent="Listen to the room";$("#liveConf").textContent="Couldn't get a clear read — raise Mic level and try again";return;}
+  dispKey=km||"";dispBpm=bm||0;liveShownKey=dispKey;
+  $("#liveBpm").textContent=dispBpm||"—";$("#liveKey").textContent=dispKey||"—";
+  $("#liveTitle").textContent="Locked";
+  $("#liveConf").textContent="Locked"+(dispKey?(" "+dispKey):"")+(dispBpm?(" · "+dispBpm+" BPM"):"")+" — tap What's this? to name it";
+  micPhase="locked";$("#micToggle").textContent="Analyze again";$("#micToggle").style.background="var(--surface)";
+  nowPlaying={id:"__live__",title:"Live input",artist:"From the mic",bpm:dispBpm,key:dispKey,energy:null};
+  renderWheel($("#liveWheel"),dispKey);renderMatchList($("#liveMatches"),nowPlaying);
+}
+function stopMicHW(){micOn=false;if(micTimer){clearInterval(micTimer);micTimer=null;}
   try{micProc&&micProc.disconnect();micSink&&micSink.disconnect();}catch(e){}
   try{micStream&&micStream.getTracks().forEach(t=>t.stop());}catch(e){}
   try{micCtx&&micCtx.close();}catch(e){}
-  micStream=micCtx=micProc=null;
-  $("#micToggle").textContent="Listen";$("#micToggle").style.background="var(--surface)";$("#liveVinyl").classList.remove("spin");}
+  micStream=micCtx=micProc=null;}
+function stopMic(){if(listenTimer){clearInterval(listenTimer);listenTimer=null;}stopMicHW();
+  micPhase="idle";$("#micToggle").textContent="Listen & lock";$("#micToggle").style.background="var(--surface)";$("#liveVinyl").classList.remove("spin");
+  $("#liveTitle").textContent="Listen to the room";}
 function analyzeMic(sr){
   if(!micOn||!micBuf)return;
   const N=micBuf.length,want=Math.min(N,Math.floor(sr*8)),seg=new Float32Array(want);
   let start=(micWrite-want+N)%N;for(let i=0;i<want;i++)seg[i]=micBuf[(start+i)%N];
   let rms=0;for(let i=0;i<want;i++)rms+=seg[i]*seg[i];rms=Math.sqrt(rms/want);
-  if(rms<0.004){$("#liveConf").textContent="too quiet — turn it up or move closer";return;}
+  if(rms<0.004)return;                              // too quiet this slice — skip, countdown keeps going
   const k=detectKey(chromaOf(seg,sr)),cam=keyToCamelot(k.tonic,k.mode),bpm=foldBpmMaybe(detectBPM(seg,sr));
-  keyHist.push(cam);if(keyHist.length>9)keyHist.shift();
-  bpmHist.push(bpm);if(bpmHist.length>9)bpmHist.shift();
-  const km=modeOf(keyHist),bm=median(bpmHist);
-  // hysteresis: only change the shown key after a challenger holds for 3 reads
-  if(km&&km!==dispKey){kmStreak++;if(!dispKey||kmStreak>=3){dispKey=km;kmStreak=0;}}else kmStreak=0;
-  if(bm){if(!dispBpm)dispBpm=bm;else if(Math.abs(bm-dispBpm)>1){bmStreak++;if(bmStreak>=2){dispBpm=bm;bmStreak=0;}}else bmStreak=0;}
-  $("#liveBpm").textContent=dispBpm||"—";$("#liveKey").textContent=dispKey||"—";
-  $("#liveTitle").textContent="Live input";
-  const conf=k.score>0.7?"strong":k.score>0.5?"fair":"weak";
-  $("#liveConf").textContent=(dispKey?`Best guess ${dispKey} · ${conf} signal`:"listening…")+" — tap What's this? to name it accurately";
-  // only re-render wheel + matches when the locked key actually changes (stops the constant reflow)
-  if(dispKey!==liveShownKey){liveShownKey=dispKey;
-    nowPlaying={id:"__live__",title:"Live input",artist:"From the mic",bpm:dispBpm,key:dispKey||"",energy:null};
-    renderWheel($("#liveWheel"),dispKey||"");renderMatchList($("#liveMatches"),nowPlaying);
-  } else if(nowPlaying&&nowPlaying.id==="__live__"){nowPlaying.bpm=dispBpm;}
+  if(cam){keyHist.push(cam);if(keyHist.length>12)keyHist.shift();}
+  if(bpm){bpmHist.push(bpm);if(bpmHist.length>12)bpmHist.shift();}
 }
-$("#micToggle").onclick=()=>{micOn?stopMic():startMic();};
+$("#micToggle").onclick=()=>{if(micPhase==="listening")stopMic();else startMic();};
+$("#auddKeyBtn").onclick=()=>tokenSheet();
 micGain=+(localStorage.rg_micgain||15)/10;
 $("#micGain").value=Math.round(micGain*10);$("#micGainVal").textContent=micGain.toFixed(1)+"×";
 $("#micGain").oninput=e=>{micGain=+e.target.value/10;$("#micGainVal").textContent=micGain.toFixed(1)+"×";localStorage.rg_micgain=e.target.value;};
@@ -938,18 +970,19 @@ $("#micId").onclick=async()=>{
   if(micUnsupported()){toast("Naming needs a secure (https) page");return;}
   let token=localStorage.rg_audd||"";
   if(!token){tokenSheet();return;}
-  if(!micStream){toast("Tap Listen first");return;}
-  $("#liveConf").textContent="Listening for ~6s to name it…";
+  let idStream=null;
+  try{idStream=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){toast("Mic was blocked — allow it for this site");return;}
+  $("#liveTitle").textContent="Naming…";$("#liveConf").textContent="Listening ~6s to name it…";$("#liveVinyl").classList.add("spin");
   try{
-    const rec=new MediaRecorder(micStream);const chunks=[];
+    const rec=new MediaRecorder(idStream);const chunks=[];
     rec.ondataavailable=e=>chunks.push(e.data);
     rec.start();await new Promise(r=>setTimeout(r,6000));rec.stop();
     await new Promise(r=>rec.onstop=r);
     const blob=new Blob(chunks);const fd=new FormData();fd.append("api_token",token);fd.append("file",blob);fd.append("return","apple_music,spotify");
     const resp=await fetch("https://api.audd.io/",{method:"POST",body:fd});
     const j=await resp.json();
-    if(j.status==="success"&&j.result){const t=j.result.title,a=j.result.artist;
-      $("#liveTitle").textContent=t;$("#liveConf").textContent="“"+t+"” — "+a+" · finding key…";
+    if(j.status==="success"&&j.result){const t=j.result.title,a=j.result.artist,yr=(j.result.release_date||"").slice(0,4);
+      $("#liveConf").textContent="“"+t+"” — finding key…";
       let bpm=null,key="";
       const m=matchSong(t,a);
       if(m.songs.length){const s0=m.songs.find(s=>s.key)||m.songs[0];bpm=s0.bpm||null;key=s0.key||"";}   // your library = most accurate
@@ -964,13 +997,17 @@ $("#micId").onclick=async()=>{
         if(!ALL.some(s=>s.id===id)){const o={id,title:t,artist:a,bpm,release:(j.result.album||""),mix:"",label:"",time:"",cwarn:0,end:"",key,energy:null,fav:0};await put(o);ALL.push(o);MATCHIDX=null;buildView();updateStats();}}
       const en=(m.songs[0]&&m.songs[0].energy)||null;
       nowPlaying={id:"__live__",title:t,artist:a,bpm,key,energy:en};
-      dispKey=key||dispKey;if(bpm)dispBpm=bpm;liveShownKey=key;
+      dispKey=key||dispKey;if(bpm)dispBpm=bpm;liveShownKey=key;micPhase="locked";
       $("#liveKey").textContent=key||"—";if(bpm)$("#liveBpm").textContent=bpm;
-      $("#liveConf").innerHTML=`“${esc(t)}” — ${esc(a)} · <b style="color:var(--blue)">${key||"key ?"}</b>${bpm?(" · "+bpm+" BPM"):""}<br>${songLinks(t,a,j.result)}`;
+      $("#liveTitle").textContent="Identified";
+      $("#liveConf").innerHTML=`<b style="color:var(--blue)">${key||"key ?"}</b>${bpm?(" · "+bpm+" BPM"):""}`;
+      $("#liveSong").innerHTML=`<div class="songname">${esc(t)}${yr?` <span class="yr">(${yr})</span>`:""}</div><div class="songart">${esc(a)}</div>${songLinks(t,a,j.result)}`;
+      $("#micToggle").textContent="Analyze again";$("#micToggle").style.background="var(--surface)";
       renderWheel($("#liveWheel"),key);renderMatchList($("#liveMatches"),nowPlaying);
       toast(key?("Identified · "+key+(bpm?(" · "+bpm+" BPM"):"")):"Identified — key not found online");
-    } else {$("#liveConf").textContent="Couldn't name that one — turn the mic level up and try a clearer section";}
-  }catch(e){$("#liveConf").textContent="Naming failed (needs internet / token). Live key+BPM still works.";}
+    } else {$("#liveTitle").textContent="Listen to the room";$("#liveConf").textContent="Couldn't name that one — raise mic level and try a clearer section";}
+  }catch(e){$("#liveConf").textContent="Naming failed (needs internet / token). Listen & lock still works.";}
+  finally{try{idStream&&idStream.getTracks().forEach(t=>t.stop());}catch(e){}$("#liveVinyl").classList.remove("spin");}
 };
 function tokenSheet(){openSheet(`<h2>Name songs from the mic</h2>
   <div class="sa">Optional. Uses AudD, a song-recognition service.</div>
