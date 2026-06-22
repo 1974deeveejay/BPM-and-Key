@@ -417,12 +417,13 @@ html:not([data-reduce]) .wseg.active{animation:wpulse 1.05s ease-in-out infinite
       </div>
       <div class="card">
         <h2>Fetch keys online</h2>
-        <p class="muted">Pulls key (and BPM) from <b>GetSongBPM</b>'s database for songs that don't have a key yet, matched by title + artist. Honest limits: it needs a free API key, it's rate-limited (works in batches), and it won't have every Promo Only instrumental or edit — so it fills what it can, and you key the rest from your audio.</p>
+        <p class="muted">Pulls key (and BPM) from <b>GetSongBPM</b> for songs without a key, matched by title + artist. <b>Auto-fetch</b> grinds through your whole list on its own, paced to stay safely under the ~3000/hour limit — if it ever hits the wall it pauses ~1 hour and resumes by itself. It only runs while this page is open and in front, and it keeps the screen awake; progress is saved, so you can close it and tap Auto-fetch again to continue. Coverage is partial (many Promo Only instrumentals/edits aren't in any database).</p>
         <div id="gsbProg" class="small" style="margin:6px 0"></div>
-        <button class="btn" id="gsbRun">Fetch missing keys (batch)</button>
+        <button class="btn" id="gsbAuto">Auto-fetch all (stays under limit)</button>
+        <button class="btn ghost sm" id="gsbRun" style="margin-top:8px">Or fetch one batch (200)</button>
         <button class="btn ghost sm" id="gsbStop" style="display:none;color:var(--red)">Stop</button>
         <button class="btn ghost sm" id="gsbReset" style="margin-top:8px">Retry skipped (not-found) songs</button>
-        <p class="small" style="margin-top:8px">Data from <a href="https://getsongbpm.com" target="_blank" rel="noopener">GetSongBPM.com</a>. Tap once to set your free API key.</p>
+        <p class="small" style="margin-top:8px">Data from <a href="https://getsongbpm.com" target="_blank" rel="noopener">GetSongBPM.com</a>. Tap Auto-fetch once to set your free API key.</p>
       </div>
       <div class="card">
         <h2>Appearance</h2>
@@ -1160,7 +1161,30 @@ $("#normBpm").onclick=()=>{if(!foldMin){toast("Pick a range first (not Off)");re
   run:async()=>{const save=[];for(const s of ALL){if(s.bpm){const nb=foldBpm(s.bpm,foldMin);if(nb!==s.bpm){s.bpm=nb;save.push(s);}}}
     if(save.length)await putMany(save);buildView();updateStats();toast("Adjusted "+save.length+" songs");}});
 };
-let gsbStop=false;
+/* request throttle: stay safely under GetSongBPM's ~3000/hour limit */
+const GSB_CAP=2800, GSB_GAP=1350;           // hourly cap (margin) + min spacing per request
+let gsbReq=[]; try{gsbReq=JSON.parse(localStorage.rg_gsbreq||"[]");}catch(e){gsbReq=[];}
+let gsbLast=0;
+function gsbSleep(ms){return new Promise(r=>setTimeout(r,Math.max(0,ms)));}
+function gsbPrune(){const cut=Date.now()-3600000;gsbReq=gsbReq.filter(t=>t>cut);}
+async function gsbThrottle(){
+  gsbPrune();
+  if(gsbReq.length>=GSB_CAP){const w=gsbReq[0]+3600000-Date.now()+800;await gsbBackoffMsg(w);gsbPrune();}
+  const since=Date.now()-gsbLast;if(since<GSB_GAP)await gsbSleep(GSB_GAP-since);
+}
+async function gsbFetch(url){
+  await gsbThrottle();
+  gsbLast=Date.now();gsbReq.push(gsbLast);try{localStorage.rg_gsbreq=JSON.stringify(gsbReq.slice(-3200));}catch(e){}
+  const r=await fetch(url);
+  if(r.status===429||r.status===403){const e=new Error("rate");e.rate=true;throw e;}
+  return r;
+}
+async function gsbBackoffMsg(ms){const until=Date.now()+ms;
+  while(Date.now()<until&&(autoOn||gsbStop===false)){const left=Math.ceil((until-Date.now())/60000);
+    const p=$("#gsbProg");if(p)p.innerHTML=`<span class="small" style="color:var(--orange)">Hourly limit reached — auto-pausing ~${left} min, then resuming. Keep this page open.</span>`;
+    await gsbSleep(5000);if(!autoOn&&gsbStop)break;}
+}
+let gsbStop=false,autoOn=false,wakeLock=null;
 function gsbSheet(){openSheet(`<h2>Fetch keys online</h2>
   <div class="sa">Uses GetSongBPM — a free key + BPM database.</div>
   <p class="muted">Register a free API key at getsongbpm.com (they ask for a backlink, which this app includes). Paste it once and it's saved on this device.</p>
@@ -1171,18 +1195,56 @@ function gsbSheet(){openSheet(`<h2>Fetch keys online</h2>
 }
 async function gsbLookup(title,artist,key){
   const ak=encodeURIComponent(key);
-  async function search(lk){const r=await fetch(`https://api.getsong.co/search/?api_key=${ak}&type=song&lookup=${encodeURIComponent(lk)}`);
+  async function search(lk){const r=await gsbFetch(`https://api.getsong.co/search/?api_key=${ak}&type=song&lookup=${encodeURIComponent(lk)}`);
     const j=await r.json();return (j&&Array.isArray(j.search))?j.search:null;}
   let arr=await search(`song:${title} artist:${primArtist(artist)}`);
   if(!arr||!arr.length)arr=await search(title);           // fallback: title only
   if(!arr||!arr.length)return null;
   const hit=arr[0];let kof=hit.key_of,tempo=hit.tempo;
   if(kof===undefined&&hit.id){                            // key/tempo live on the song detail endpoint
-    const r2=await fetch(`https://api.getsong.co/song/?api_key=${ak}&id=${encodeURIComponent(hit.id)}`);
+    const r2=await gsbFetch(`https://api.getsong.co/song/?api_key=${ak}&id=${encodeURIComponent(hit.id)}`);
     const j2=await r2.json();if(j2&&j2.song){kof=j2.song.key_of;tempo=j2.song.tempo;}
   }
   return {key:normKey(kof||""),bpm:parseInt(tempo||0)||null};   // key_of is musical (e.g. "Em") -> normKey -> Camelot
 }
+/* AUTO mode: grind the whole list, throttled, resumes across sessions */
+async function gsbAutoToggle(){
+  if(autoOn){autoOn=false;return;}
+  if(!window.isSecureContext){toast("Online fetch needs the hosted https site");return;}
+  const key=localStorage.rg_gsb||"";if(!key){gsbSheet();return;}
+  autoOn=true;gsbStop=false;
+  try{if(navigator.wakeLock)wakeLock=await navigator.wakeLock.request("screen");}catch(e){}
+  const ab=$("#gsbAuto");ab.textContent="Stop auto-fetch";ab.style.background="var(--redC)";ab.style.color="var(--red)";
+  $("#gsbRun").style.display="none";$("#gsbReset").style.display="none";
+  const idx=new Map();for(const s of ALL){const k=taKey(s.title,s.artist);if(!idx.has(k))idx.set(k,[]);idx.get(k).push(s);}
+  const need=[],seen=new Set();
+  for(const s of ALL){if(s.key||s.tried)continue;const k=taKey(s.title,s.artist);if(seen.has(k))continue;seen.add(k);need.push({title:s.title,artist:s.artist,k});}
+  const total=need.length;let i=0,filled=0,miss=0,errs=0;
+  if(!total){$("#gsbProg").innerHTML=`<span class="small">Nothing left to look up. Use Retry skipped to re-try not-found ones.</span>`;}
+  while(i<need.length&&autoOn){
+    const it=need[i];let res=null;
+    try{res=await gsbLookup(it.title,it.artist,key);errs=0;}
+    catch(e){if(e.rate){await gsbBackoffMsg(61*60000);continue;}              // limit hit -> pause then retry same item
+      errs++;if(errs>=8){$("#gsbProg").innerHTML=`<div class="muted">Connection trouble — auto-fetch stopped. Tap Auto-fetch to resume; progress is saved.</div>`;break;}
+      await gsbSleep(2500);i++;continue;}
+    const vs=idx.get(it.k)||[];
+    if(res&&res.key){for(const s of vs){let ch=false;if(!s.key){s.key=res.key;ch=true;}if(!s.bpm&&res.bpm){s.bpm=foldBpmMaybe(res.bpm);ch=true;}if(s.tried){s.tried=0;ch=true;}if(ch)await put(s);}filled++;}
+    else{for(const s of vs){if(!s.tried){s.tried=1;await put(s);}}miss++;}
+    i++;
+    if(i%10===0){MATCHIDX=null;buildView();updateStats();}
+    gsbPrune();
+    $("#gsbProg").innerHTML=`<div class="anbar"><i style="width:${(i/total*100).toFixed(1)}%"></i></div>
+      <span class="small">Auto: ${i.toLocaleString()}/${total.toLocaleString()} · filled <b>${filled}</b> · not found ${miss} · ${gsbReq.length}/${GSB_CAP} this hour</span>`;
+  }
+  MATCHIDX=null;buildView();updateStats();
+  autoOn=false;try{if(wakeLock){await wakeLock.release();wakeLock=null;}}catch(e){}
+  ab.textContent="Auto-fetch all (stays under limit)";ab.style.background="";ab.style.color="";
+  $("#gsbRun").style.display="block";$("#gsbReset").style.display="block";
+  if(i>=total&&total)$("#gsbProg").innerHTML=`<span class="small">All done — filled <b>${filled}</b>, not found ${miss}.</span>`;
+}
+document.addEventListener("visibilitychange",async()=>{   // re-grab the screen lock when page returns to front
+  if(autoOn&&document.visibilityState==="visible"&&!wakeLock){try{wakeLock=await navigator.wakeLock.request("screen");}catch(e){}}
+});
 $("#gsbStop").onclick=()=>{gsbStop=true;};
 $("#gsbRun").onclick=async()=>{
   if(!window.isSecureContext){toast("Online fetch needs the hosted https site");return;}
@@ -1213,9 +1275,9 @@ $("#gsbRun").onclick=async()=>{
   if(!$("#gsbProg").querySelector(".muted"))$("#gsbProg").innerHTML=`<span class="small">Batch done — filled <b>${filled}</b>, not found <b>${miss}</b> (skipped next time).${remaining?` ${remaining.toLocaleString()} new ones still to try — run again.`:" Every song has now been tried."}</span>`;
   toast(`Filled ${filled} keys`);
 };
-$("#gsbReset").onclick=async()=>{const ch=ALL.filter(s=>s.tried);if(!ch.length){toast("Nothing was skipped");return;}
-  if(!confirm(`Retry the ${ch.length.toLocaleString()} songs the database couldn't find last time? (Useful if it has grown, or you switched key sources.)`))return;
+$("#gsbReset").onclick=async()=>{const ch=ALL.filter(s=>s.tried);if(!ch.length){toast("Nothing was skipped");return;}  if(!confirm(`Retry the ${ch.length.toLocaleString()} songs the database couldn't find last time? (Useful if it has grown, or you switched key sources.)`))return;
   for(const s of ch)s.tried=0;await putMany(ch);updateStats();toast("Cleared — they'll be looked up again next run");};
+$("#gsbAuto").onclick=gsbAutoToggle;
 
 /* ============ chips / nav ============ */
 const CHIPS=[["all","All"],["bpm","Has BPM"],["nokey","Needs key"],["key","Has key"],["fav","★ Favorites"]];
