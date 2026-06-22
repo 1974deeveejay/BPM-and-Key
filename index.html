@@ -431,8 +431,23 @@ html:not([data-reduce]) .wseg.active{animation:wpulse 1.05s ease-in-out infinite
         </div>
       </div>
       <div class="card">
+        <h2>Clean up duplicates</h2>
+        <p class="muted">Scan first to see what's there. "Exact duplicates" only removes truly identical rows. "Collapse to one per song" is more aggressive — it keeps a single entry per song and drops the clean/instrumental versions (merging their keys into the one kept).</p>
+        <button class="btn ghost sm" id="dupScan">Scan for duplicates</button>
+        <div id="dupInfo" style="margin:10px 0"></div>
+        <div style="display:flex;gap:10px">
+          <button class="btn ghost sm" id="dupExact" style="flex:1">Remove exact</button>
+          <button class="btn ghost sm" id="dupSong" style="flex:1;color:var(--red)">Collapse versions</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Safety code</h2>
+        <p class="muted">A 4-digit code protects every delete/reset/normalize action — you enter it, get an "are you sure?", and enter it once more before anything permanent happens. So nothing wipes your work by accident.</p>
+        <button class="btn ghost sm" id="pinChange">Set / change safety code</button>
+      </div>
+      <div class="card">
         <h2>Reset</h2>
-        <p class="muted">Reload the original 13k starter songs, or wipe everything and start clean.</p>
+        <p class="muted">Reload the original starter songs, or wipe everything and start clean. Both are protected by your safety code.</p>
         <div style="display:flex;gap:10px">
           <button class="btn ghost sm" id="reseedBtn" style="flex:1">Reload starter</button>
           <button class="btn ghost sm" id="wipeBtn" style="flex:1;color:var(--red)">Erase all</button>
@@ -536,6 +551,7 @@ function getAll(){return new Promise((res)=>{const out=[];const c=tx("readonly")
   c.onsuccess=e=>{const cur=e.target.result; if(cur){out.push(cur.value);cur.continue();}else res(out);};});}
 function put(o){return new Promise(r=>{const q=tx("readwrite").put(o);q.onsuccess=r;});}
 function putMany(arr){return new Promise(res=>{const st=tx("readwrite");arr.forEach(o=>st.put(o));st.transaction.oncomplete=res;});}
+function delMany(ids){return new Promise(res=>{const st=tx("readwrite");ids.forEach(id=>st.delete(id));st.transaction.oncomplete=res;});}
 function clearAll(){return new Promise(res=>{const q=tx("readwrite").clear();q.onsuccess=res;});}
 function count(){return new Promise(res=>{const q=tx("readonly").count();q.onsuccess=e=>res(e.target.result);});}
 
@@ -1064,19 +1080,85 @@ function updateStats(){
   const bpEl=$("#covBpmPct");if(bpEl)bpEl.textContent=bp+"%";
   const kt=$("#covKeyTxt");if(kt)kt.textContent=nkey.toLocaleString()+" of "+ALL.length.toLocaleString()+" keyed · "+(ALL.length-nkey).toLocaleString()+" to go";
 }
-$("#reseedBtn").onclick=async()=>{if(!confirm("Reload the original starter songs? Your edits to those songs will be reset, but imported songs stay."))return;
-  await ensureSeed(true);ALL=await getAll();buildView();updateStats();toast("Starter reloaded");};
-$("#wipeBtn").onclick=async()=>{if(!confirm("Erase the entire library? This cannot be undone."))return;
-  await clearAll();ALL=[];buildView();updateStats();nowPlaying=null;renderMix();toast("Library erased");};
+/* ============ SAFETY CODE (PIN) for destructive actions ============ */
+function pinGet(){return localStorage.rg_pin||"";}
+function pinSetupSheet(after){
+  openSheet(`<h2>Create a safety code</h2><div class="sa">A 4-digit code guards delete & reset actions so you can't wipe your work by accident.</div>
+    <div class="field"><label>New 4-digit code</label><input id="pin1" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off"></div>
+    <div class="field"><label>Re-enter code</label><input id="pin2" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off"></div>
+    <button class="btn" id="pinSave">Save code</button>
+    <p class="small">Stored only on this device. Write it down — there's no recovery. If forgotten, delete/reset actions stay locked (everything else keeps working).</p>`);
+  $("#pinSave").onclick=()=>{const a=$("#pin1").value,b=$("#pin2").value;
+    if(!/^\d{4}$/.test(a)){toast("Enter 4 digits");return;}if(a!==b){toast("Codes don't match");return;}
+    localStorage.rg_pin=a;closeSheet();toast("Safety code set");if(after)after();};
+}
+function destructive(opts){ // {title, body, danger, run}
+  if(!pinGet()){pinSetupSheet(()=>destructive(opts));return;}
+  openSheet(`<h2>${esc(opts.title)}</h2><div class="sa">${esc(opts.body)}</div>
+    <div id="dStep1"><div class="field"><label>Enter your 4-digit code</label><input id="pinIn" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off"></div>
+      <button class="btn ghost sm" id="dNext">Continue</button></div>
+    <div id="dStep2" style="display:none">
+      <div class="card" style="background:var(--redC);border:none;margin:4px 0 12px"><b style="color:var(--red)">Are you absolutely sure?</b>
+        <div class="small" style="color:var(--red);margin-top:4px">${esc(opts.body)} This can't be undone — enter the code once more to confirm.</div></div>
+      <div class="field"><input id="pinIn2" type="tel" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off"></div>
+      <button class="btn" id="dGo" style="background:var(--red);color:#fff">${esc(opts.danger||"Yes, do it")}</button></div>
+    <button class="btn ghost sm" id="dCancel" style="margin-top:8px">Cancel</button>`);
+  $("#dCancel").onclick=closeSheet;
+  $("#dNext").onclick=()=>{if($("#pinIn").value!==pinGet()){toast("Wrong code");return;}
+    $("#dStep1").style.display="none";$("#dStep2").style.display="block";};
+  $("#dGo").onclick=async()=>{if($("#pinIn2").value!==pinGet()){toast("Code doesn't match");return;}closeSheet();await opts.run();};
+}
+$("#pinChange").onclick=()=>{const cur=pinGet();
+  if(!cur){pinSetupSheet();return;}
+  destructive({title:"Change safety code",body:"Set a new 4-digit code.",danger:"Change code",run:()=>pinSetupSheet()});
+};
+
+/* ============ DEDUPLICATE ============ */
+function dscore(s){return (s.key?8:0)+(s.bpm?4:0)+(s.energy?2:0)+(!s.mix?1:0);}
+function dupScan(mode){
+  const groups=new Map();
+  for(const s of ALL){const k=mode==="song"
+      ?(nrmTitle(s.title)+"\u0001"+nrmArtist(s.artist))
+      :(nrmTitle(s.title)+"\u0001"+nrmArtist(s.artist)+"\u0001"+(s.mix||"").toLowerCase().trim()+"\u0001"+(s.release||"").toLowerCase().trim());
+    if(!groups.has(k))groups.set(k,[]);groups.get(k).push(s);}
+  const del=[],survChanged=[];
+  for(const g of groups.values()){if(g.length<2)continue;
+    g.sort((a,b)=>dscore(b)-dscore(a));const keep=g[0];let kch=false;
+    for(let i=1;i<g.length;i++){const o=g[i];
+      if(!keep.key&&o.key){keep.key=o.key;kch=true;}
+      if(!keep.bpm&&o.bpm){keep.bpm=o.bpm;kch=true;}
+      if(!keep.energy&&o.energy){keep.energy=o.energy;kch=true;}
+      del.push(o.id);}
+    if(kch)survChanged.push(keep);}
+  return {del,survChanged};
+}
+async function runDedup(mode){
+  const {del,survChanged}=dupScan(mode);
+  if(!del.length){toast("No duplicates found");return;}
+  if(survChanged.length)await putMany(survChanged);
+  await delMany(del);
+  const ds=new Set(del);ALL=ALL.filter(s=>!ds.has(s.id));
+  SET=SET.filter(id=>!ds.has(id));persistSet();
+  MATCHIDX=null;buildView();updateStats();
+  toast("Removed "+del.length.toLocaleString()+" duplicate"+(del.length>1?"s":""));
+}
+$("#dupScan").onclick=()=>{const ex=dupScan("exact").del.length,sg=dupScan("song").del.length;
+  $("#dupInfo").innerHTML=`<span class="small">Exact duplicates found: <b>${ex.toLocaleString()}</b>. Collapsing every song to a single entry would remove <b>${sg.toLocaleString()}</b> version-rows (their keys merge into the one kept).</span>`;};
+$("#dupExact").onclick=()=>destructive({title:"Remove exact duplicates",body:"Removes rows that are truly identical (same title, artist, mix and release), keeping one of each.",danger:"Remove duplicates",run:()=>runDedup("exact")});
+$("#dupSong").onclick=()=>destructive({title:"Collapse to one per song",body:"Keeps a single entry per song (same title + artist) and removes the other versions (clean, instrumental, etc.). Any keys/BPM on the removed versions are merged into the one kept.",danger:"Collapse versions",run:()=>runDedup("song")});
+
+$("#reseedBtn").onclick=()=>destructive({title:"Reload starter songs",body:"Resets your edits to the original starter songs. Imported songs stay.",danger:"Reload starter",
+  run:async()=>{await ensureSeed(true);ALL=await getAll();buildView();updateStats();toast("Starter reloaded");}});
+$("#wipeBtn").onclick=()=>destructive({title:"Erase the entire library",body:"Deletes ALL songs, keys, BPMs and edits.",danger:"Erase everything",
+  run:async()=>{await clearAll();ALL=[];SET=[];persistSet();buildView();updateStats();nowPlaying=null;renderMix();toast("Library erased");}});
 
 /* ============ BPM normalize + online keys ============ */
 $$("#foldSeg button").forEach(b=>b.classList.toggle("on",+b.dataset.m===foldMin));
 $$("#foldSeg button").forEach(b=>b.onclick=()=>{foldMin=+b.dataset.m;localStorage.rg_foldmin=foldMin;$$("#foldSeg button").forEach(x=>x.classList.toggle("on",x===b));});
-$("#normBpm").onclick=async()=>{
-  if(!foldMin){toast("Pick a range first (not Off)");return;}
-  if(!confirm("Fold every song's BPM into "+foldMin+"–"+(foldMin*2)+"? You can re-import your Promo Only file to undo."))return;
-  const save=[];for(const s of ALL){if(s.bpm){const nb=foldBpm(s.bpm,foldMin);if(nb!==s.bpm){s.bpm=nb;save.push(s);}}}
-  if(save.length)await putMany(save);buildView();updateStats();toast("Adjusted "+save.length+" songs");
+$("#normBpm").onclick=()=>{if(!foldMin){toast("Pick a range first (not Off)");return;}
+  destructive({title:"Normalize all BPM",body:`Folds every song's BPM into ${foldMin}–${foldMin*2}. Re-import your Promo Only file to undo.`,danger:"Normalize BPM",
+  run:async()=>{const save=[];for(const s of ALL){if(s.bpm){const nb=foldBpm(s.bpm,foldMin);if(nb!==s.bpm){s.bpm=nb;save.push(s);}}}
+    if(save.length)await putMany(save);buildView();updateStats();toast("Adjusted "+save.length+" songs");}});
 };
 let gsbStop=false;
 function gsbSheet(){openSheet(`<h2>Fetch keys online</h2>
